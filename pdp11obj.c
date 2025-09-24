@@ -46,6 +46,7 @@ static void rad50_symbol(char *sym, struct object *obj, size_t offset);
 static void print_flags(uint8_t fl, flags defs);
 static void gsd(struct object *obj, size_t offset, size_t len);
 static void text(struct object *obj, size_t offset, size_t len);
+static void rld(struct object *obj, size_t offset, size_t len, size_t lastoffs);
 
 
 int main(int argc, char *argv[]) 
@@ -61,6 +62,7 @@ int main(int argc, char *argv[])
     }
 
     size_t i = 0;
+    size_t lastoffs = 0;
 
     //
     // Every block starts with 000001. Every block contains at least 7 bytes:
@@ -111,12 +113,16 @@ int main(int argc, char *argv[])
             break;
 
         case REC_TXT:
+            lastoffs = start; 
             text(obj, start + 6, blklen - 6);
+            break;
+
+        case REC_RLD:
+            rld(obj, start + 6, blklen - 6, lastoffs);
             break;
         }
 
     }
-
 
     return 0;
 }
@@ -330,4 +336,185 @@ void text(struct object *obj, size_t offset, size_t len)
     } 
 
     printf("\n");
+}
+
+#define RLD_INT                 001
+#define RLD_GBL                 002
+#define RLD_INT_DISP            003
+#define RLD_GBL_DISP            004
+#define RLD_GBL_ADD             005
+#define RLD_GBL_ADD_DISP        006
+#define RLD_LOCDEF              007
+#define RLD_LOCMOD              010
+#define RLD_PROG_LIMIT          011
+#define RLD_PSECT               012
+//                              013 not used
+#define RLD_PSECT_DISP          014
+#define RLD_PSECT_ADD           015
+#define RLD_PSECT_ADD_DISP      016
+#define RLD_COMPLEX             017
+
+struct rlddef {
+    char *name;
+    int has_symbol;
+    int has_const;
+    int has_disp;
+};
+
+static struct rlddef rlddefs[] = {
+    { NULL,                                     0, 0, 0, },
+    { "Internal relocation",                    0, 1, 1, },
+    { "Global relocation",                      1, 0, 1, },
+    { "Internal displaced relocation",          0, 1, 1, },
+    { "Global displaced relocation",            1, 0, 1, },
+    { "Global additive relocation",             1, 1, 1, },
+    { "Global additive displaced relocation",   1, 1, 1, },
+    { "Location counter definition",            1, 1, 0, },
+    { "Location counter modification",          0, 1, 0, },
+    { "Progam limit",                           0, 0, 1, },
+    { "P-sect relocation",                      1, 0, 1, },
+    { NULL,                                     0, 0, 1, },
+    { "P-sect displacd relocation",             1, 0, 1, },
+    { "P-sect additive relocation",             1, 1, 1, },
+    { "P-sect additive displaced relocation",   1, 1, 1, },
+    { "Complex relocation",                     0, 0, 0, },                // special case
+};
+
+void rld(struct object *obj, size_t offset, size_t len, size_t lastoffs)
+{
+    char sym[7];
+    size_t end = offset + len;
+
+    //
+    // Skip previous header
+    // 
+    lastoffs += 4;
+
+    //
+    // NB unlike GSD records, RLD records are variable length, so if 
+    // we come across one we don't recognize, we can't just ignore 
+    // it.
+    //
+
+    while (offset < end) {
+        if (end - offset < 2) {
+            printf("?OBJ - RLD record header is truncated.\n");
+            break;
+        }
+
+        uint16_t hdr = WORD(obj, offset);
+        int type = hdr & 0177;
+        int bbit = hdr & 0200;
+        int disp = hdr >> 8;
+        
+
+        if (type < RLD_COMPLEX && rlddefs[type].name) {
+            struct rlddef *def = &rlddefs[type];
+            int len = 2 + (def->has_symbol ? 4 : 0) + (def->has_const ? 2 : 0);
+            if (end - len < offset) {
+                printf("?OBJ - %s record is truncated.", def->name);
+                break;
+            }
+
+            printf("%06lo |  ", offset);
+            
+            offset += 2;
+            printf("%s", def->name);
+
+            if (def->has_symbol) {
+                rad50_symbol(sym, obj, offset);
+                offset += 4;
+
+                printf(" [%s]", sym);
+            }
+
+            if (def->has_const) {
+                uint16_t constant = WORD(obj, offset);
+                offset += 2;
+
+                if (def->has_symbol) {
+                    printf("+");
+                } else {
+                    printf(" ");
+                }
+                printf("%06o", constant);
+            }
+
+            if (def->has_disp) {
+                if (bbit) {
+                    printf(" [Byte]");
+                }
+
+                printf(" at %06lo", lastoffs + disp);
+            }
+            printf("\n");
+        } else if (type == RLD_COMPLEX) {
+            printf("%06lo |  Complex relocation at %06lo%s\n", offset, lastoffs + disp, bbit ? " [Byte]": "");
+            offset += 2;
+
+            while (offset < end) {
+                printf("%06lo |    ", offset);
+                uint8_t op = obj->data[offset++];
+
+                switch (op) {
+                case 000: printf("NOP\n"); break;
+                case 001: printf("ADD\n"); break;
+                case 002: printf("SUB\n"); break;
+                case 003: printf("MUL\n"); break;
+                case 004: printf("DIV\n"); break;
+                case 005: printf("AND\n"); break;
+                case 006: printf("OR\n"); break;
+                case 007: printf("XOR\n"); break;
+                case 010: printf("NEG\n"); break;
+                case 011: printf("COMP\n"); break;
+                case 012: printf("STORE\n"); break;
+                case 013: printf("STORE Displaced\n"); break;
+                case 016:
+                    if (end - 4 < offset) {
+                        printf("\n?OBJ - Complex relocation is truncated.\n");
+                        return;
+                    } else {
+                        rad50_symbol(sym, obj, offset);
+                        printf("PUSH [%s]\n", sym);
+                        offset += 4;
+                    }
+                    break;
+
+                case 017: 
+                    if (end - 3 < offset) {
+                        printf("\n?OBJ - Complex relocation is truncated.\n");
+                        return;
+                    } else {
+                        uint8_t sect = obj->data[offset++];
+                        uint16_t constant = WORD(obj, offset);
+                        offset += 2;
+                        printf("PUSH <Section#%o+%06o>\n", sect, constant);
+                    }
+                    break;
+
+                case 020: 
+                    if (end - 2 < offset) {
+                        printf("\n?OBJ - Complex relocation is truncated.\n");
+                        return;
+                    } else {
+                        uint16_t constant = WORD(obj, offset);
+                        offset += 2;
+                        printf("PUSH %06o\n", constant);
+                    }
+                    break;
+
+                default:
+                    printf("\n?OBJ - Invalid complex relocation opcode %03o.\n", op);
+                    return;
+                }
+
+                if (op == 012 || op == 013) {
+                    break;
+                }
+            }
+        } else {
+            printf("?OBJ - Unknown relocation type %03o at offset %06lo.\n", type, offset);
+            break;
+        }
+    }
 }
