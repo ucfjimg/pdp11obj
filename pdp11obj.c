@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct object {
     uint8_t *data;
@@ -40,6 +41,10 @@ typedef struct flag flags[8];
 #define REC_LIB         7
 #define REC_LIBEND      8
 
+#define MAXSECT 256
+#define SYMLEN 6
+static char sects[SYMLEN * MAXSECT];
+static int nsects = 0;
 
 static struct object *read_obj(char *fn);
 static void rad50_symbol(char *sym, struct object *obj, size_t offset);
@@ -89,10 +94,12 @@ int main(int argc, char *argv[])
             break;
         }
 
-        printf("%06lo | Length %06o Type %06o", start, blklen, blktyp);
+        printf("%06lo | Length %06o", start, blklen);
 
         if (blktyp < nrectypes && rectypes[blktyp]) {
             printf(" %s", rectypes[blktyp]);
+        } else {
+            printf(" Type %06o", blktyp);
         }
         printf("\n");
 
@@ -121,7 +128,6 @@ int main(int argc, char *argv[])
             rld(obj, start + 6, blklen - 6, lastoffs);
             break;
         }
-
     }
 
     return 0;
@@ -267,6 +273,10 @@ void gsd(struct object *obj, size_t offset, size_t len)
                 break;
 
             case GSD_CSECT:
+                if (nsects < MAXSECT) {
+                    memcpy(&sects[SYMLEN * nsects], sym, SYMLEN);
+                    nsects++;
+                } 
                 printf("%06lo |  GSD CSECT [%s] Maximum Length %06o\n", offset, sym, WORD(obj, offset + 6));
                 break;
 
@@ -285,6 +295,10 @@ void gsd(struct object *obj, size_t offset, size_t len)
                 break;
 
             case GSD_PSECT:
+                if (nsects < MAXSECT) {
+                    memcpy(&sects[SYMLEN * nsects], sym, SYMLEN);
+                    nsects++;
+                } 
                 printf("%06lo |  GSD PSECT [%s] Maximum Length %06o ", offset, sym, WORD(obj, offset + 6));
                 print_flags(flags, psect_flags);
                 printf("\n");
@@ -488,7 +502,12 @@ void rld(struct object *obj, size_t offset, size_t len, size_t lastoffs)
                         uint8_t sect = obj->data[offset++];
                         uint16_t constant = WORD(obj, offset);
                         offset += 2;
-                        printf("PUSH <Section#%o+%06o>\n", sect, constant);
+
+                        if (sect < nsects) {
+                            printf("[%6.6s]+%06o\n", sects+sect*SYMLEN, constant);
+                        } else {
+                            printf("PUSH <Section#%o+%06o>\n", sect, constant);
+                        }
                     }
                     break;
 
