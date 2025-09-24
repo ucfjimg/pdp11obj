@@ -504,7 +504,7 @@ void rld(struct object *obj, size_t offset, size_t len, size_t lastoffs)
                         offset += 2;
 
                         if (sect < nsects) {
-                            printf("[%6.6s]+%06o\n", sects+sect*SYMLEN, constant);
+                            printf("PUSH [%6.6s]+%06o\n", sects+sect*SYMLEN, constant);
                         } else {
                             printf("PUSH <Section#%o+%06o>\n", sect, constant);
                         }
