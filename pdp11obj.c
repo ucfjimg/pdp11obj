@@ -133,7 +133,9 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-
+/*
+ * Read an entire object file.
+ */
 struct object *read_obj(char *fn)
 {
     FILE *fp = fopen(fn, "rb");
@@ -199,6 +201,9 @@ void rad50_symbol(char *sym, struct object *obj, size_t offset)
     sym[s] = '\0';
 }
 
+/*
+ * Print flags from a byte.
+ */
 void print_flags(uint8_t fl, flags defs)
 {
     int first = 1;
@@ -250,6 +255,9 @@ static flags psect_flags = {
 };
 
 
+/*
+ * Print a global symbol record.
+ */
 void gsd(struct object *obj, size_t offset, size_t len)
 {
     char sym[7];
@@ -322,6 +330,9 @@ void gsd(struct object *obj, size_t offset, size_t len)
     }
 }
 
+/*
+ * Print an octal dump of literal text data.
+ */
 void text(struct object *obj, size_t offset, size_t len)
 {
     if (len < 2) {
@@ -394,6 +405,9 @@ static struct rlddef rlddefs[] = {
     { "Complex relocation",                     0, 0, 0, },                // special case
 };
 
+/*
+ * Print a relocation record.
+ */
 void rld(struct object *obj, size_t offset, size_t len, size_t lastoffs)
 {
     char sym[7];
@@ -423,6 +437,10 @@ void rld(struct object *obj, size_t offset, size_t len, size_t lastoffs)
         
 
         if (type < RLD_COMPLEX && rlddefs[type].name) {
+            //
+            // All records other than complex have a symbol and/or a constant value
+            // (or neither) in the same order.
+            //
             struct rlddef *def = &rlddefs[type];
             int len = 2 + (def->has_symbol ? 4 : 0) + (def->has_const ? 2 : 0);
             if (end - len < offset) {
@@ -463,6 +481,9 @@ void rld(struct object *obj, size_t offset, size_t len, size_t lastoffs)
             }
             printf("\n");
         } else if (type == RLD_COMPLEX) {
+            //
+            // Complex relocs are stored in RPN (i.e. value unop or left right binop).
+            //
             printf("%06lo |  Complex relocation at %06lo%s\n", offset, lastoffs + disp, bbit ? " [Byte]": "");
             offset += 2;
 
